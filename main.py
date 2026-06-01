@@ -3,9 +3,24 @@ import time
 import os
 import threading
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Security, Depends
+from fastapi.security.api_key import APIKeyHeader
 import uvicorn
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# API Key Security
+API_KEY = os.environ.get("FOREX_API_KEY", "bf_sec_k_9A7B6C5D4E3F2G1H")
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key_header_value: str = Security(api_key_header)):
+    if api_key_header_value == API_KEY:
+        return api_key_header_value
+    else:
+        raise HTTPException(status_code=401, detail="Invalid or missing API Key")
 
 # Selenium Imports
 from selenium import webdriver
@@ -141,7 +156,7 @@ def home():
     return {"message": "Forex Selenium API is running. Go to /calendar"}
 
 @app.get("/calendar")
-def read_calendar():
+def read_calendar(api_key: str = Depends(get_api_key)):
     global cached_calendar_data, last_fetch_time, is_fetching
     print("Received request for calendar...")
     
