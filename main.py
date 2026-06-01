@@ -1,9 +1,11 @@
 import json
 import time
 import os
+import threading
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 import uvicorn
+from contextlib import asynccontextmanager
 
 # Selenium Imports
 from selenium import webdriver
@@ -11,7 +13,40 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 
-app = FastAPI()
+# Global Cache Variables
+cached_calendar_data = None
+last_fetch_time = None
+is_fetching = False
+
+def update_cache_periodically():
+    global cached_calendar_data, last_fetch_time, is_fetching
+    while True:
+        try:
+            print("Starting background fetch for Forex Factory data...")
+            is_fetching = True
+            data = get_forex_factory_data()
+            if data:
+                cached_calendar_data = data
+                last_fetch_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                print("Background fetch successful. Data cached.")
+            else:
+                print("Background fetch returned empty.")
+        except Exception as e:
+            print(f"Error in background fetch: {e}")
+        finally:
+            is_fetching = False
+            
+        # Wait for 15 minutes (900 seconds) before fetching again
+        time.sleep(900)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the background thread for scraping when the app starts
+    thread = threading.Thread(target=update_cache_periodically, daemon=True)
+    thread.start()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 def setup_driver():
     """
@@ -107,16 +142,47 @@ def home():
 
 @app.get("/calendar")
 def read_calendar():
+    global cached_calendar_data, last_fetch_time, is_fetching
     print("Received request for calendar...")
+    
+    # If we have cached data, return it immediately
+    if cached_calendar_data is not None:
+        return {
+            "count": len(cached_calendar_data),
+            "timezone_info": "All times are in UTC",
+            "last_updated": last_fetch_time,
+            "events": cached_calendar_data
+        }
+    
+    # If no data and currently fetching in background, wait a bit
+    if is_fetching:
+        print("Data is currently being fetched in the background. Waiting...")
+        for _ in range(60): # Wait up to 60 seconds
+            time.sleep(1)
+            if cached_calendar_data is not None:
+                return {
+                    "count": len(cached_calendar_data),
+                    "timezone_info": "All times are in UTC",
+                    "last_updated": last_fetch_time,
+                    "events": cached_calendar_data
+                }
+        raise HTTPException(status_code=503, detail="Data is still being fetched. Please try again in a few seconds.")
+        
+    # If no data and not fetching, do a synchronous fetch as a fallback
+    print("No cache available. Fetching synchronously...")
     data = get_forex_factory_data()
     
     if data is None:
         raise HTTPException(status_code=500, detail="Failed to scrape data")
     
+    cached_calendar_data = data
+    last_fetch_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    
     return {
-        "count": len(data),
+        "count": len(cached_calendar_data),
         "timezone_info": "All times are in UTC",
-        "events": data
+        "last_updated": last_fetch_time,
+        "events": cached_calendar_data
     }
 
 if __name__ == "__main__":
