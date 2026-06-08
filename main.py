@@ -152,6 +152,7 @@ def get_forex_factory_data():
             driver.quit()
 
 @app.get("/")
+@app.head("/")
 def home():
     return {"status": "ok", "message": "Forex Economic Calendar API is running..."}
 
