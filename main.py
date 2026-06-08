@@ -153,7 +153,7 @@ def get_forex_factory_data():
 
 @app.get("/")
 def home():
-    return {"message": "Forex Selenium API is running. Go to /calendar"}
+    return {"status": "ok", "message": "Forex Economic Calendar API is running..."}
 
 @app.get("/calendar")
 def read_calendar(api_key: str = Depends(get_api_key)):
